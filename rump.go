@@ -1,9 +1,10 @@
 package main
 
 import (
-	"os"
-	"fmt"
 	"flag"
+	"fmt"
+	"os"
+
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -19,7 +20,7 @@ func handle(err error) {
 func get(conn redis.Conn, queue chan<- map[string]string) {
 	var (
 		cursor int64
-		keys []string
+		keys   []string
 	)
 
 	for {
@@ -59,10 +60,14 @@ func get(conn redis.Conn, queue chan<- map[string]string) {
 }
 
 // Restore a batch of keys on destination.
-func put(conn redis.Conn, queue <-chan map[string]string) {
+func put(conn redis.Conn, ttl int, queue <-chan map[string]string) {
 	for batch := range queue {
 		for key, value := range batch {
 			conn.Send("RESTORE", key, "0", value)
+
+			if ttl > 0 {
+				conn.Send("EXPIRE", key, ttl)
+			}
 		}
 		_, err := conn.Do("")
 		handle(err)
@@ -74,6 +79,7 @@ func put(conn redis.Conn, queue <-chan map[string]string) {
 func main() {
 	from := flag.String("from", "", "example: redis://127.0.0.1:6379/0")
 	to := flag.String("to", "", "example: redis://127.0.0.1:6379/1")
+	ttl := flag.Int("ttl", 0, "ttl value, 0 by default")
 	flag.Parse()
 
 	source, err := redis.DialURL(*from)
@@ -90,7 +96,7 @@ func main() {
 	go get(source, queue)
 
 	// Restore keys as they come into queue.
-	put(destination, queue)
+	put(destination, *ttl, queue)
 
 	fmt.Println("Sync done.")
 }
